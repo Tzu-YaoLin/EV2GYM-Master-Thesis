@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 
 # EV2Gym: A Realistic EV-V2G-Gym Simulator for EV Smart Charging
 
@@ -322,3 +323,6 @@ This project is licensed under the MIT License - see the [LICENSE.md](LICENSE) f
 EV2Gym is an open-source project and welcomes contributions! Please get in contact with us if you would like to discuss about the simulator.
 
 
+=======
+# EV2GYM-Master-Thesis
+>>>>>>> 09fa76d3e8931a7843a1464075079b831582cfba
