@@ -89,8 +89,12 @@ def profit_maximization(env, total_costs, user_satisfaction_list, low_price_thre
     ''' This reward function is used for the profit maximization case '''
     
     # 確保 total_costs 是數值型
+    if isinstance(total_costs, torch.Tensor):
+        total_costs = total_costs.item()  # 將 Tensor 轉換為 Python 數值
+
     if not isinstance(total_costs, (int, float)):
         raise TypeError(f"Expected total_costs to be int or float, but got {type(total_costs)}")
+
 
    #reward = max(0, float(total_costs))  # 確保 total_costs 是正數浮點數
     reward = total_costs
