@@ -96,17 +96,12 @@ class EV_Charger:
 
 
     def step(self, actions, charge_price, discharge_price):
-        '''
-        Updates the EV charger status according to the actions taken by the EVs
-        Inputs:
-            - actions: a list of actions taken by the EVs connected to the EV charger in the format of (current) *n_ports positive for charging negative for discharging, default is to zero if no EV is connected        
-            - charge_price: the price of charging per kWh in the current timestep
-            - discharge_price: the price of discharging per kWh in the current timestep
-        Outputs:
-            - profit: the total profit + costs of charging and discharging in the current timestep
-            - user_satisfaction: a list of user satisfaction values for each EV connected to the EV charger in the current timestep
-        '''
-        actions = torch.tensor(actions) if not isinstance(actions, torch.Tensor) else actions  # 确保 actions 是 Tensor
+        # 確保 actions 是 Tensor 並進行複製
+        actions = torch.tensor(actions) if not isinstance(actions, torch.Tensor) else actions.clone()
+        
+        # 檢查 NaN 值並報錯
+        if torch.isnan(actions).any():
+            raise ValueError(f"Actions contain NaN values: {actions}")
         
         profit = 0
         user_satisfaction = []
@@ -115,25 +110,30 @@ class EV_Charger:
         self.current_charge_price = charge_price
         self.current_discharge_price = discharge_price
         self.current_signal = []
-    
-        assert (len(actions) == self.n_ports)
+        
+        assert len(actions) == self.n_ports, f"Expected {self.n_ports} actions, got {len(actions)}"
         invalid_action_punishment = 0
+    
+        # 如果沒有 EV 連接，則將該位置的 action 設置為 0
         for i in range(len(actions)):
             if self.evs_connected[i] is None:
                 actions[i] = 0
                 invalid_action_punishment += 1
-    
-        if torch.sum(actions) > 1:
-            normalized_actions = [action / torch.sum(actions).item() for action in actions]
-        elif torch.sum(actions) < -1:
-            normalized_actions = [- action /
-                                  torch.sum(actions).item() for action in actions]
+        
+        # 計算 action 的總和，並避免除零
+        total_action_sum = torch.sum(actions).item()
+        
+        if total_action_sum > 1:
+            normalized_actions = actions / total_action_sum
+        elif total_action_sum < -1:
+            normalized_actions = -actions / total_action_sum
         else:
-            normalized_actions = actions
-    
+            normalized_actions = actions  # 若總和在 [-1, 1] 內，則不需要歸一化
+        
         if self.verbose:
             print(f'CS {self.id} normalized actions: {normalized_actions}')
-
+            # 接下來的代碼不變，繼續處理 normalized_actions
+            
         # Update EVs connected to the EV charger and get profits/costs
         for i, action in enumerate(normalized_actions):
             actual_energy = 0

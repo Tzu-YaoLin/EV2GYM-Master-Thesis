@@ -19,32 +19,35 @@ import pandas as pd
 from state import V2G_profit_max
 from reward import profit_maximization  # 確保 v2g_profit_reward 定義在 reward.py 中
 
+
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # 超參數
 BATCH_SIZE = 64
-GAMMA = 0.99
+GAMMA = 0.95
 TAU = 0.005
-LR = 1e-4  # 學習率
+LR = 1e-3  # 學習率
 
 # 使用绝对路径配置文件
 config_file = "C:\\Users\\River\\Desktop\\EV2Gym-main\\EV2Gym-main\\ev2gym\\example_config_files\\V2GProfitMax.yaml"
 
 # 加載家庭負載數據
-household_loads_df = pd.read_csv('C:\\Users\\River\\Desktop\\EV2Gym-main\\EV2Gym-main\\ev2gym\\data\\standardlastprofil-haushalte-2023.csv')
+household_loads_df = pd.read_csv('C:\\Users\\River\\Desktop\\EV2Gym-main\\EV2Gym-main\\ev2gym\\data\\standardlastprofil-haushalte-2023.csv', sep=',', engine='python')
 household_loads = household_loads_df['SLP-Bandlastkunden HB [kWh]'].values
 
 # 讀取電價資料 (假設您只需要 'Germany/Luxembourg [€/MWh]' 列的電價)
-electricity_prices_df = pd.read_csv('C:/Users/River/Desktop/EV2Gym-main/EV2Gym-main/ev2gym/data/Day-ahead_prices_202301010000_202401010000_Quarterhour.csv', sep=';', engine='python')
+electricity_prices_df = pd.read_csv('C:/Users/River/Desktop/EV2Gym-main/EV2Gym-main/ev2gym/data/Day-ahead_prices_202301010000_202401010000_Quarterhour_processed.csv', sep=',', engine='python')
 
 # 提取電價列並將其轉換為 numpy 陣列
 electricity_prices = electricity_prices_df['Germany/Luxembourg [€/MWh] Calculated resolutions'].values
 
+# 檢查並替換 NaN 值
+electricity_prices = np.nan_to_num(electricity_prices, nan=0.0)
 
 # 创建环境
 env = EV2Gym(config_file,
              render_mode=True,
-             seed=42,
+             seed=None,
              save_plots=False,
              save_replay=False)
 
@@ -54,11 +57,18 @@ env.household_loads = household_loads
 # 加入電價資料到環境中
 env.electricity_prices = electricity_prices
 
-# 設定狀態函數為 V2G_profit_max
-env.state_function = V2G_profit_max
+# 計算低電價和高電價的閾值
+low_price_threshold = np.percentile(electricity_prices, 25)  # 第25百分位數
+high_price_threshold = np.percentile(electricity_prices, 75)  # 第75百分位數
 
-# 設定新的獎勵函數為 v2g_profit_reward
-env.set_reward_function(profit_maximization)
+
+# 設定狀態函數為 V2G_profit_max，不再傳遞均值和標準差
+env.state_function = lambda *args: V2G_profit_max(env, *args)
+
+
+# 設定新的獎勵函數為 profit_maximization
+env.set_reward_function(lambda env_instance, total_costs, user_satisfaction_list, *args: 
+    profit_maximization(env_instance, total_costs, user_satisfaction_list, low_price_threshold, high_price_threshold))
 
 # 計算所有充電站的總埠數並設置 n_actions
 total_ports = sum(cs.n_ports for cs in env.charging_stations)
@@ -66,6 +76,10 @@ n_actions = total_ports  # 確保 n_actions 與總埠數相同
 
 # Get the initial state
 env.reset()
+# Reset the environment and get the initial state
+state, _ = env.reset()
+print(f"Initial state: {state}")
+
 
 # Actor network
 class Actor(nn.Module):
@@ -82,24 +96,23 @@ class Actor(nn.Module):
         output = output.squeeze(0)  # 去掉多餘的維度
         #print(f"Actor output shape: {output.shape}")  # 打印形狀
         return output
-# Critic network
 class Critic(nn.Module):
     def __init__(self, n_observations, n_actions):
         super(Critic, self).__init__()
-        self.layer1 = nn.Linear(n_observations + n_actions, 128)
-        self.layer2 = nn.Linear(128, 128)
-        self.layer3 = nn.Linear(128, 1)
+        self.layer1 = nn.Linear(n_observations + n_actions, 256)  # 增加單元數
+        self.layer2 = nn.Linear(256, 256)
+        self.layer3 = nn.Linear(256, 128)
+        self.output_layer = nn.Linear(128, 1)  # 增加一層輸出
 
     def forward(self, state, action):
-        # 如果 action 是 1D 張量，則將其擴展為 2D
         if action.dim() == 1:
-            action = action.unsqueeze(1)  # 使 action 張量的形狀變為 [batch_size, 1]
+            action = action.unsqueeze(1)  # 確保 action 是 2D 張量
 
-        # 拼接 state 和 action
         x = torch.cat([state, action], dim=1)
         x = F.relu(self.layer1(x))
         x = F.relu(self.layer2(x))
-        return self.layer3(x)
+        x = F.relu(self.layer3(x))
+        return self.output_layer(x)
 
 # 定義 Transition
 Transition = namedtuple('Transition', ('state', 'action', 'next_state', 'reward'))
@@ -118,26 +131,6 @@ class ReplayMemory(object):
     def __len__(self):
         return len(self.memory)
 
-# OUNoise 的定義
-class OUNoise:
-    def __init__(self, action_dim, scale=0.1, mu=0, theta=0.15, sigma=0.2):
-        self.action_dim = action_dim
-        self.scale = scale
-        self.mu = mu
-        self.theta = theta
-        self.sigma = sigma
-        self.state = np.ones(self.action_dim) * self.mu
-        self.reset()
-
-    def reset(self):
-        self.state = np.ones(self.action_dim) * self.mu
-
-    def noise(self):
-        x = self.state
-        dx = self.theta * (self.mu - x) + self.sigma * np.random.randn(self.action_dim)
-        self.state = x + dx
-        return self.state * self.scale
-
 # Initialize networks
 state, _ = env.reset()
 n_observations = len(state)
@@ -154,37 +147,34 @@ optimizer_actor = optim.Adam(actor.parameters(), lr=LR)
 optimizer_critic = optim.Adam(critic.parameters(), lr=LR)
 memory = ReplayMemory(10000)
 
-# Initialize OUNoise
-ou_noise = OUNoise(action_dim=n_actions)
 
 steps_done = 0
 
-# Select action with noise
+# 初始化 epsilon 參數
+epsilon = 1.0  # 初始探索概率
+epsilon_min = 0.01  # 最小 epsilon 值
+epsilon_decay = 0.995  # 每次選擇行動後的 epsilon 衰減比例
+
 # 修改 select_action 函數
 def select_action(state):
+    global epsilon  # 引入 epsilon 變量
     state = state.unsqueeze(0)  # 保證 state 是二維的
-    action = actor(state).cpu().data.numpy()  # 直接從 Actor 網絡獲取行動
-    action = action.squeeze(0)  # 去掉多餘的維度
-    action += ou_noise.noise()  # 添加探索噪音
-    action = np.clip(action, -1, 1)  # 確保行動在邊界內
+    
+    # 使用 epsilon-greedy 策略選擇行動
+    if np.random.rand() < epsilon:
+        # 探索：隨機選擇動作
+        action = np.random.uniform(-1, 1, n_actions)  # 隨機選擇一個在 [-1, 1] 範圍內的動作
+    else:
+        # 利用：從 Actor 網絡獲取當前最佳動作
+        action = actor(state).cpu().data.numpy()
+        action = action.squeeze(0)  # 去掉多餘的維度
 
-    # 調整 action 長度使其符合 total_ports
-    if len(action) != total_ports:
-        action = np.resize(action, total_ports)
-    
-    # 根據當前步驟的電價調整行動
-    current_price = env.electricity_prices[env.current_step]
-    
-    # 如果電價低於某個閾值，增加充電力度
-    if current_price < 50:  # 假設 50 €/MWh 是低電價閾值
-        action = np.clip(action * 1.2, -1, 1)  # 增強充電力度
-    # 如果電價高於某個閾值，減少充電力度或增加放電
-    elif current_price > 100:  # 假設 100 €/MWh 是高電價閾值
-        action = np.clip(action * 0.8, -1, 1)  # 減少充電力度
-    
+    action = np.clip(action, -1, 1)  # 確保動作在 [-1, 1] 範圍內
+
+    # 每次選擇行動後，逐漸減少 epsilon 的值
+    epsilon = max(epsilon_min, epsilon * epsilon_decay)
+
     return action
-
-
 
 def optimize_model():
     if len(memory) < BATCH_SIZE:
@@ -201,6 +191,13 @@ def optimize_model():
     action_batch = torch.stack([torch.tensor(batch.action[i], dtype=torch.float32) if isinstance(batch.action[i], np.ndarray) else batch.action[i].float() for i in valid_indices])
     
     reward_batch = torch.cat([batch.reward[i].clone().detach() for i in valid_indices])
+    
+    # 檢查是否有 nan 值
+    if torch.isnan(state_batch).any() or torch.isnan(action_batch).any():
+        #print(f"Invalid values in state or action batch during optimization at step {t} in episode {i_episode}")
+        #print(f"State batch range: {state_batch.min().item()} to {state_batch.max().item()}")
+        #print(f"Action batch range: {action_batch.min().item()} to {action_batch.max().item()}")
+        return
 
 
     # 檢查拼接後的維度
@@ -219,16 +216,23 @@ def optimize_model():
 
     optimizer_critic.zero_grad()
     critic_loss.backward()
+    # 限制 Critic 梯度的大小
+    torch.nn.utils.clip_grad_norm_(critic.parameters(), max_norm=1.0)
     optimizer_critic.step()
 
     # Update Actor
     actor_loss = -critic(state_batch, actor(state_batch)).mean()
     optimizer_actor.zero_grad()
     actor_loss.backward()
+    # 限制 Actor 梯度的大小
+    torch.nn.utils.clip_grad_norm_(actor.parameters(), max_norm=1.0)
     optimizer_actor.step()
     
     #print(f'State-Action values shape: {state_action_values.shape}')
     #print(f'Expected State-Action values shape: {expected_state_action_values.shape}')
+    #print(f"State batch range: {state_batch.min().item()} to {state_batch.max().item()}")
+    #print(f"Action batch range: {action_batch.min().item()} to {action_batch.max().item()}")
+    #print(f"Episode {i_episode}, Step {t}, Actor Loss: {actor_loss.item()}, Critic Loss: {critic_loss.item()}")
 
     # Soft update of target networks
     for target_param, param in zip(target_critic.parameters(), critic.parameters()):
@@ -248,12 +252,13 @@ else:
 for i_episode in range(num_episodes):
     # Initialize the environment and get its state
     state, _ = env.reset()
+    if torch.isnan(torch.tensor(state)).any():
+        print("Invalid state after reset:", state)
     state = torch.tensor(state, dtype=torch.float32, device=device).unsqueeze(0)
     
-    ou_noise.reset()  # Reset noise at the beginning of each episode
     episode_reward = 0
     for t in count():
-        action = select_action(state)
+        action = select_action(state)  # 使用 Epsilon-Greedy 選擇行動
 
         # 檢查 action 的大小
         if len(action) != n_actions:
@@ -261,8 +266,12 @@ for i_episode in range(num_episodes):
 
         observation, reward, done, truncated, stats = env.step(action)
         episode_reward += reward
-        reward = torch.tensor([reward], dtype=torch.float32, device=device)        
-
+        reward = torch.tensor([reward], dtype=torch.float32, device=device)
+        
+        # 檢查 reward 是否為 NaN 或無限大
+        if math.isnan(reward.item()) or math.isinf(reward.item()):
+            print(f"Invalid reward detected: {reward.item()} at step {t} in episode {i_episode}")
+        
         if done:
             next_state = None
         else:
@@ -271,13 +280,16 @@ for i_episode in range(num_episodes):
         memory.push(state, action, next_state, reward)
         state = next_state
 
-        optimize_model()
+        optimize_model()  # 優化模型
         
+        # 結束 episode 時記錄
         if done or truncated:
             episode_rewards.append(episode_reward)
             episode_stats.append(stats)
             print(f'Episode {i_episode} finished after {t + 1} timesteps, total reward: {episode_reward:.2f}')
+            print(f'Epsilon after episode {i_episode}: {epsilon:.4f}')  # 輸出當前的 epsilon 值
             break
+
 
 # Save results
 results = pd.DataFrame(episode_rewards, columns=["Episode Reward"])

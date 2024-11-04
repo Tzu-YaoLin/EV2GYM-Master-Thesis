@@ -81,9 +81,11 @@ def V2G_profit_max(env, *args):
     
     state.append(electricity_prices)
     
-    # 加入家庭負載數據
-    current_load = env.household_loads[env.current_step]  # 取當前時間步的家庭負載
+    # 直接加入家庭負載數據和電價（假設已經標準化）
+    current_load = env.household_loads[env.current_step]
+    current_price = env.electricity_prices[env.current_step]
     state.append(current_load)
+    state.append(current_price)
 
     # For every transformer
     for tr in env.transformers:

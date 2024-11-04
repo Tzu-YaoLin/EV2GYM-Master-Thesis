@@ -263,7 +263,7 @@ class Renderer():
                     self.ev_list[counter].set_visible(True)
                     # 顯示 SOC 百分比
                     self.ev_list[counter].set_title(
-                        f"{round(ev_connected.get_soc(), 1)}%",
+                        f"{round(float(ev_connected.get_soc()), 1)}%",
                         fontsize=8,
                         color="green"
                     )

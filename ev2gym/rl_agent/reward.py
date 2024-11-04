@@ -1,7 +1,18 @@
 '''This file contains various example reward functions for the RL agent. Users can create their own reward function here or in their own file using the same structure as below
 '''
-
+import numpy as np
 import math
+#import pandas as pd
+
+# 讀取電價資料 (假設您只需要 'Germany/Luxembourg [€/MWh]' 列的電價)
+#electricity_prices_df = pd.read_csv('C:/Users/River/Desktop/EV2Gym-main/EV2Gym-main/ev2gym/data/Day-ahead_prices_202301010000_202401010000_Quarterhour.csv', sep=';', engine='python')
+
+# 提取電價列並將其轉換為 numpy 陣列
+#electricity_prices = electricity_prices_df['Germany/Luxembourg [€/MWh] Calculated resolutions'].values
+
+# 計算低電價和高電價的閾值
+#low_price_threshold = np.percentile(electricity_prices, 25)  # 第25百分位數
+#high_price_threshold = np.percentile(electricity_prices, 75)  # 第75百分位數
 
 def SquaredTrackingErrorReward(env,*args):
     '''This reward function is the squared tracking error that uses the minimum of the power setpoints and the charge power potential
@@ -74,38 +85,54 @@ def MinimizeTrackerSurplusWithChargeRewards(env,*args):
     
     return reward
 
-def profit_maximization(env, total_costs, user_satisfaction_list, *args):
+def profit_maximization(env, total_costs, user_satisfaction_list, low_price_threshold, high_price_threshold, *args):
     ''' This reward function is used for the profit maximization case '''
     
-    reward = total_costs
+    # 確保 total_costs 是數值型
+    if not isinstance(total_costs, (int, float)):
+        raise TypeError(f"Expected total_costs to be int or float, but got {type(total_costs)}")
 
+   #reward = max(0, float(total_costs))  # 確保 total_costs 是正數浮點數
+    reward = total_costs
     # 檢查 current_step 是否超出變壓器最大功率數組範圍
     if env.current_step < len(env.transformers[0].max_power):
         transformer_capacity = env.transformers[0].max_power[env.current_step]
     else:
-        # 如果超出範圍，使用最後一個有效值
         transformer_capacity = env.transformers[0].max_power[-1]
 
-    # 用戶滿意度處理
-    for score in user_satisfaction_list:
-        reward -= 100 * math.exp(-10 * score)
+    # 如果 user_satisfaction_list 是整數，將其轉換為列表
+    if isinstance(user_satisfaction_list, int):
+        user_satisfaction_list = [user_satisfaction_list]
 
+    # 用戶滿意度處罰
+    user_satisfaction_weight = 0.8  # 調整這裡的權重
+    for score in user_satisfaction_list:
+        score = max(-10, score)  # 限制最低分數，避免過度懲罰
+        reward -= user_satisfaction_weight * 400 * score  # 減少懲罰的幅度，並使用線性懲罰
+        
     # 加入基於家庭負載的處罰
     current_load = env.household_loads[env.current_step]  # 當前家庭負載
     available_capacity = transformer_capacity - current_load
+    transformer_penalty_weight = 0.4  # 調整這裡的權重
 
-    # 如果家庭負載超過變壓器容量，進行懲罰
+    # 如果家庭負載超過變壓器容量，根據超出容量的比例懲罰
     if available_capacity < 0:
-        reward -= 50  # 懲罰強度可調整
+        reward -= transformer_penalty_weight * 100 * abs(available_capacity) / transformer_capacity  # 減少懲罰的強度
 
     # 加入電價影響，使用實時電價
     current_price = env.electricity_prices[env.current_step]  # 當前電價（€/MWh）
+    price_penalty_weight = 0.7  # 調整這裡的權重
 
-    # 如果電價低於 50 €/MWh，給予正獎勵；如果電價高於 100 €/MWh，給予懲罰
-    if current_price < 50:
-        reward += 50  # 獎勵低電價時充電
-    elif current_price > 100:
-        reward -= 50  # 懲罰高電價時充電
+    # 根據電價差距動態調整獎勵或懲罰
+    if current_price < low_price_threshold:
+        reward += price_penalty_weight * 500 * (low_price_threshold - current_price) / low_price_threshold
+    elif current_price > high_price_threshold:
+        reward -= price_penalty_weight * 500 * (current_price - high_price_threshold) / high_price_threshold
+
+    # 檢查是否出現 NaN 或無窮大情況
+    if math.isnan(reward) or math.isinf(reward):
+        print(f"Invalid reward detected: {reward} at step {env.current_step}")
+        reward = -1000  # or set to another large negative value to discourage this scenario
 
     return reward
 
