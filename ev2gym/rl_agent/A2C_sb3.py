@@ -1,4 +1,11 @@
-from stable_baselines3 import DDPG
+# -*- coding: utf-8 -*-
+"""
+Created on Tue Nov  5 20:02:02 2024
+
+@author: River
+"""
+
+from stable_baselines3 import A2C
 from stable_baselines3.common.vec_env import DummyVecEnv
 from stable_baselines3.common.callbacks import CheckpointCallback
 import gymnasium as gym
@@ -59,37 +66,34 @@ env.set_reward_function(lambda env_instance, total_costs, user_satisfaction_list
 vec_env = DummyVecEnv([lambda: env])
 
 # 超參數
-BATCH_SIZE = 64
-GAMMA = 0.95
-TAU = 0.005
 LR = 1e-3  # 學習率
 
-# 初始化 DDPG 模型
-model = DDPG('MlpPolicy', vec_env, learning_rate=LR, batch_size=BATCH_SIZE, gamma=GAMMA, verbose=1, tensorboard_log="./ddpg_ev2gym_tensorboard/")
+# 初始化 A2C 模型
+model = A2C('MlpPolicy', vec_env, learning_rate=LR, gamma=0.95, verbose=1, tensorboard_log="./a2c_ev2gym_tensorboard/", device=device)
 
 # 訓練模型
 model.learn(total_timesteps=100000, log_interval=10)
 
 # 保存模型
-model.save("ddpg_ev2gym_model")
+model.save("a2c_ev2gym_model")
 
 # 測試模型
 obs = vec_env.reset()
 episode_rewards = []
 for _ in range(50):
-    obs = vec_env.reset()  # 每次開始新的一個 episode 都重置環境
+    obs = vec_env.reset()
     episode_reward = 0
     done = False
     while not done:
         action, _states = model.predict(obs, deterministic=True)
         obs, reward, done, info = vec_env.step(action)
-
+        
         # 將 Tensor 類型的觀察值和獎勵轉換為數值型
         if isinstance(reward, torch.Tensor):
             reward = reward.item()
         if isinstance(obs, torch.Tensor):
             obs = obs.numpy()  # 如果是 Tensor，轉換為 numpy
-
+            
         episode_reward += reward
     episode_rewards.append(episode_reward)
 
@@ -98,7 +102,7 @@ print("Episode rewards:", episode_rewards)
 plt.plot(episode_rewards)
 plt.xlabel('Episode')
 plt.ylabel('Total Reward')
-plt.title('Testing Results')
+plt.title('A2C Testing Results')
 plt.show()
 
 window = 100  # 設置移動平均窗口大小
@@ -108,4 +112,3 @@ plt.xlabel('Episode')
 plt.ylabel('Moving Average Reward')
 plt.title('Moving Average of Total Reward')
 plt.show()
-
