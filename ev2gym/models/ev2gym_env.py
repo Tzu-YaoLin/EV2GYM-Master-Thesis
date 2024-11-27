@@ -22,22 +22,22 @@ from ev2gym.utilities.utils import get_statistics, print_statistics, calculate_c
 from ev2gym.utilities.loaders import load_ev_spawn_scenarios, load_power_setpoints, load_transformers, load_ev_charger_profiles, load_ev_profiles, load_electricity_prices
 from ev2gym.visuals.render import Renderer
 
-from ev2gym.rl_agent.reward import SquaredTrackingErrorReward
-from ev2gym.rl_agent.state import PublicPST
+from ev2gym.rl_agent.reward import profit_maximization
+from ev2gym.rl_agent.state import V2G_profit_max
 
 
 class EV2Gym(gym.Env):
 
     def __init__(self,
-                 config_file=None,
+                 config_file="../example_config_files/V2GProfitMax.yaml",
                  load_from_replay_path=None,  # path of replay file to load
                  replay_save_path='./replay/',  # where to save the replay file
                  generate_rnd_game=True,  # generate a random game without terminating conditions
                  seed=None,
                  save_replay=False,
                  save_plots=False,
-                 state_function=PublicPST,
-                 reward_function=SquaredTrackingErrorReward,
+                 state_function=V2G_profit_max,
+                 reward_function=profit_maximization,
                  eval_mode="Normal",  # eval mode can be "Normal", "Unstirred" or "Optimal" in order to save the correct statistics in the replay file
                  lightweight_plots=False,
                  # whether to empty the ports at the end of the simulation or not
@@ -131,6 +131,7 @@ class EV2Gym(gym.Env):
 
         # Whether to simulate the grid or not (Future feature...)
         self.simulate_grid = False
+        
 
         if self.cs > 100:
             self.lightweight_plots = True
@@ -234,6 +235,8 @@ class EV2Gym(gym.Env):
 
     def reset(self, seed=None, options=None, **kwargs):
         '''Resets the environment to its initial state'''
+        # 檢查 charge_prices 的長度是否足夠
+        assert self.simulation_length <= self.charge_prices.shape[1], "Error: simulation_length 超過 charge_prices 的範圍，請調整參數。"
 
         if seed is None:
             self.seed = np.random.randint(0, 1000000)
@@ -380,6 +383,12 @@ class EV2Gym(gym.Env):
         self.current_ev_arrived = 0
 
         port_counter = 0
+        
+        # 檢查是否達到模擬長度或 charge_prices 的範圍
+        if self.current_step >= self.charge_prices.shape[1]:
+            print(f"Warning: current_step {self.current_step} 超出 charge_prices 的範圍，提前結束模擬。")
+            self.done = True
+            return self._get_observation(), 0, True, False, {}  # 返回結束標記
 
         # Reset current power of all transformers
         for tr in self.transformers:
@@ -406,7 +415,7 @@ class EV2Gym(gym.Env):
 
             total_costs += costs
             total_invalid_action_punishment += invalid_action_punishment
-            self.current_ev_departed += len(user_satisfaction)
+            self.current_ev_departed += len(departing_evs)
 
             port_counter += n_ports
 
@@ -438,67 +447,84 @@ class EV2Gym(gym.Env):
         if self.current_step < self.simulation_length:
             self.charge_power_potential[self.current_step] = calculate_charge_power_potential(
                 self)
+        # 打印出 current_ev_arrived, current_ev_departed 和 current_evs_parked
+        # print(f"Step {self.current_step}: current_ev_arrived: {self.current_ev_arrived}, current_ev_departed: {self.current_ev_departed}, current_evs_parked (before update): {self.current_evs_parked}")
 
         self.current_evs_parked += self.current_ev_arrived - self.current_ev_departed
-
+        
         # Call step for the grid
         if self.simulate_grid:
             # TODO: transform actions -> grid_actions
             raise NotImplementedError
             grid_report = self.grid.step(actions=actions)
-            reward = self._calculate_reward(grid_report)
+            reward, reward_contributions = self._calculate_reward(grid_report)
         else:
-            reward = self._calculate_reward(total_costs,
-                                            user_satisfaction_list,
+            reward, reward_contributions = self._calculate_reward(total_costs,
+                                            user_satisfaction_list, actions,
                                             total_invalid_action_punishment)
 
         if visualize:
             visualize_step(self)
 
         self.render()
+        return self._check_termination(user_satisfaction_list, reward, reward_contributions)
 
-        return self._check_termination(user_satisfaction_list, reward)
-
-    def _check_termination(self, user_satisfaction_list, reward):
+    def _check_termination(self, user_satisfaction_list, reward, reward_contributions):
         '''Checks if the episode is done or any constraint is violated'''
         truncated = False
         # Check if the episode is done or any constraint is violated
         if self.current_step >= self.simulation_length or \
-            (any(tr.is_overloaded() > 0 for tr in self.transformers)
-             and not self.generate_rnd_game):
+           self.current_step >= self.charge_prices.shape[1] or \
+           (any(tr.is_overloaded() > 0 for tr in self.transformers)
+            and not self.generate_rnd_game):
             """Terminate if:
                 - The simulation length is reached
+                - The charge prices range is exceeded
                 - Any user satisfaction score is below the threshold
                 - Any charging station is overloaded
-                Dont terminate when overloading if :
+                Don't terminate when overloading if :
                 - generate_rnd_game is True
-                Carefull: if generate_rnd_game is True,
+                Careful: if generate_rnd_game is True,
                 the simulation might end up in infeasible problem
                 """
             if self.verbose:
                 print_statistics(self)
-
+    
                 if any(tr.is_overloaded() for tr in self.transformers):
-                    print(
-                        f"Transformer overloaded, {self.current_step} timesteps\n")
+                    print(f"Transformer overloaded, {self.current_step} timesteps\n")
+                elif self.current_step >= self.charge_prices.shape[1]:
+                    print(f"Warning: current_step {self.current_step} 超出 charge_prices 的範圍，提前結束模擬。")
                 else:
-                    print(
-                        f"Episode finished after {self.current_step} timesteps\n")
-
+                    print(f"Episode finished after {self.current_step} timesteps\n")
+    
             if self.save_replay:
                 self._save_sim_replay()
-
+    
             if self.save_plots:
-                #save the env as a pickle file
+                # Save the environment as a pickle file
                 with open(f"./results/{self.sim_name}/env.pkl", 'wb') as f:
                     self.renderer = None
                     pickle.dump(self, f)
                 ev_city_plot(self)
-
+    
             self.done = True
-            return self._get_observation(), reward, True, truncated, get_statistics(self)
+            info = {
+                "reward_contributions": reward_contributions,
+                "total_evs_arrived": self.current_ev_arrived,
+                "total_evs_departed": self.current_ev_departed,
+                "current_evs_parked": self.current_evs_parked,
+            }
+            return self._get_observation(), reward, True, truncated, info
         else:
-            return self._get_observation(), reward, False, truncated, {'None': None}
+            info = {
+                "reward_contributions": reward_contributions,
+                "total_evs_arrived": self.current_ev_arrived,
+                "total_evs_departed": self.current_ev_departed,
+                "current_evs_parked": self.current_evs_parked,
+            }
+            return self._get_observation(), reward, False, truncated, info
+
+
 
     def render(self):
         '''Renders the simulation'''
@@ -575,10 +601,9 @@ class EV2Gym(gym.Env):
         '''
         self.reward_function = reward_function
 
-    def _calculate_reward(self, total_costs, user_satisfaction_list, invalid_action_punishment):
+    def _calculate_reward(self, total_costs, user_satisfaction_list, actions, invalid_action_punishment):
         '''Calculates the reward for the current step'''
-
-        reward = self.reward_function(self, total_costs, user_satisfaction_list, invalid_action_punishment)
+        reward, reward_contributions = self.reward_function(self, total_costs, user_satisfaction_list, actions, invalid_action_punishment)
         self.total_reward += reward
         
-        return reward
+        return reward, reward_contributions

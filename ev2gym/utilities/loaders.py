@@ -1,15 +1,14 @@
 '''
 This file contains the loaders for the EV City environment.
 '''
-
+import sys
+sys.path.append("C:/Users/River/Desktop/EV2Gym-main/EV2Gym-main")
 import numpy as np
 import pandas as pd
 import math
 import datetime
-import pkg_resources
 import json
 from typing import List, Tuple
-
 from ev2gym.models.ev_charger import EV_Charger
 from ev2gym.models.ev import EV
 from ev2gym.models.transformer import Transformer
@@ -20,24 +19,16 @@ from ev2gym.utilities.utils import EV_spawner, generate_power_setpoints
 def load_ev_spawn_scenarios(env) -> None:
     '''Loads the EV spawn scenarios of the simulation'''
 
-    df_arrival_week_file = pkg_resources.resource_filename(
-        'ev2gym', 'data/distribution-of-arrival.csv')
-    df_arrival_weekend_file = pkg_resources.resource_filename(
-        'ev2gym', 'data/distribution-of-arrival-weekend.csv')
-    df_connection_time_file = pkg_resources.resource_filename(
-        'ev2gym', 'data/distribution-of-connection-time.csv')
-    df_energy_demand_file = pkg_resources.resource_filename(
-        'ev2gym', 'data/distribution-of-energy-demand.csv')
-    time_of_connection_vs_hour_file = pkg_resources.resource_filename(
-        'ev2gym', 'data/time_of_connection_vs_hour.npy')
+    df_arrival_week_file = ('../data/distribution-of-arrival.csv')
+    df_arrival_weekend_file = ('../data/distribution-of-arrival-weekend.csv')
+    df_connection_time_file = ('../data/distribution-of-connection-time.csv')
+    df_energy_demand_file = ('../data/distribution-of-energy-demand.csv')
+    time_of_connection_vs_hour_file = ('../data/time_of_connection_vs_hour.npy')
 
-    df_req_energy_file = pkg_resources.resource_filename(
-        'ev2gym', 'data/mean-demand-per-arrival.csv')
-    df_time_of_stay_vs_arrival_file = pkg_resources.resource_filename(
-        'ev2gym', 'data/mean-session-length-per.csv')
+    df_req_energy_file = ('../data/mean-demand-per-arrival.csv')
+    df_time_of_stay_vs_arrival_file = ('../data/mean-session-length-per.csv')
 
-    ev_specs_file = pkg_resources.resource_filename(
-        'ev2gym', 'data/ev_specs.json')
+    ev_specs_file = ('../data/ev_specs.json')
 
     env.df_arrival_week = pd.read_csv(df_arrival_week_file)  # weekdays
     env.df_arrival_weekend = pd.read_csv(df_arrival_weekend_file)  # weekends
@@ -87,57 +78,47 @@ def load_power_setpoints(env) -> np.ndarray:
 def generate_residential_inflexible_loads(env) -> np.ndarray:
     '''
     This function loads the inflexible loads of each transformer
-    in the simulation.
+    in the simulation from the given CSV file.
     '''
 
-    # Load the data
-    data_path = pkg_resources.resource_filename(
-        'ev2gym', 'data/residential_loads.csv')
-    data = pd.read_csv(data_path, header=None)
+    # Load the data from CSV file
+    data_path = ('../data/standardlastprofil-haushalte-2023.csv')
+    data = pd.read_csv(data_path, header=0)
 
+    # Combine the 'Datum' and 'Uhrzeit' columns to create a datetime index
+    data['Datetime'] = pd.to_datetime(data['Datum'] + ' ' + data['Uhrzeit'], format='%Y/%m/%d %H:%M')
+
+    # Set 'Datetime' as index and keep the load data column
+    data.set_index('Datetime', inplace=True)
+    load_column_name = data.columns[-1]  # Use the last column as the load data
+    data = data[[load_column_name]]
+
+    # Rename load column for easier reference
+    data.rename(columns={load_column_name: 'load'}, inplace=True)
+
+    # Prepare variables
     desired_timescale = env.timescale
     simulation_length = env.simulation_length
-    simulation_date = env.sim_starting_date.strftime('%Y-%m-%d %H:%M:%S')
+    simulation_starting_datetime = env.sim_starting_date
+
+    # Select data starting from the simulation date
+    data_for_simulation = data.loc[simulation_starting_datetime:]
+
+    # Ensure the data length matches the simulation length
+    if len(data_for_simulation) < simulation_length:
+        # Duplicate the data if simulation length exceeds available data
+        num_repeats = (simulation_length // len(data_for_simulation)) + 1
+        data_for_simulation = pd.concat([data_for_simulation] * num_repeats, ignore_index=True)
+    data_for_simulation = data_for_simulation.head(simulation_length)
+
+    # Generate the load for each transformer (sample columns)
+    new_data = pd.DataFrame()
     number_of_transformers = env.number_of_transformers
 
-    dataset_timescale = 15
-    dataset_starting_date = '2022-01-01 00:00:00'
-
-    if desired_timescale > dataset_timescale:
-        data = data.groupby(
-            data.index // (desired_timescale/dataset_timescale)).max()
-    elif desired_timescale < dataset_timescale:
-        # extend the dataset to data.shape[0] * (dataset_timescale/desired_timescale)
-        # by repeating the data every (dataset_timescale/desired_timescale) rows
-        data = data.loc[data.index.repeat(
-            dataset_timescale/desired_timescale)].reset_index(drop=True)
-
-    # duplicate the data to have two years of data
-    data = pd.concat([data, data], ignore_index=True)
-
-    # add a date column to the dataframe
-    data['date'] = pd.date_range(
-        start=dataset_starting_date, periods=data.shape[0], freq=f'{desired_timescale}min')
-
-    # find year of the data
-    year = int(dataset_starting_date.split('-')[0])
-    # replace the year of the simulation date with the year of the data
-    simulation_date = f'{year}-{simulation_date.split("-")[1]}-{simulation_date.split("-")[2]}'
-
-    simulation_index = data[data['date'] == simulation_date].index[0]
-
-    # select the data for the simulation date
-    data = data[simulation_index:simulation_index+simulation_length]
-
-    # drop the date column
-    data = data.drop(columns=['date'])
-    new_data = pd.DataFrame()
-
     for i in range(number_of_transformers):
-        new_data['tr_'+str(i)] = data.sample(10, axis=1,
-                                             random_state=env.tr_seed).sum(axis=1)
+        new_data[f'tr_{i}'] = data_for_simulation['load']
 
-    # return the "tr_" columns
+    # Convert to numpy array and return
     return new_data.to_numpy().T
 
 
@@ -148,8 +129,7 @@ def generate_pv_generation(env) -> np.ndarray:
     '''
 
     # Load the data
-    data_path = pkg_resources.resource_filename(
-        'ev2gym', 'data/pv_netherlands.csv')
+    data_path = ('../data/pv_netherlands.csv')
     data = pd.read_csv(data_path, sep=',', header=0)
     data.drop(['time', 'local_time'], inplace=True, axis=1)
 
@@ -363,7 +343,6 @@ def load_ev_profiles(env) -> List[EV]:
     else:
         return env.replay.EVs
 
-
 def load_electricity_prices(env) -> Tuple[np.ndarray, np.ndarray]:
     '''Loads the electricity prices of the simulation
     If load_from_replay_path is None, then the electricity prices are created randomly
@@ -376,51 +355,32 @@ def load_electricity_prices(env) -> Tuple[np.ndarray, np.ndarray]:
         return env.replay.charge_prices, env.replay.discharge_prices
 
     # else load historical prices
-    file_path = pkg_resources.resource_filename(
-        'ev2gym', 'data/Netherlands_day-ahead-2015-2023.csv')
-    data = pd.read_csv(file_path, sep=',', header=0)
-    drop_columns = ['Country', 'Datetime (Local)']
-    data.drop(drop_columns, inplace=True, axis=1)
-    data['year'] = pd.DatetimeIndex(data['Datetime (UTC)']).year
-    data['month'] = pd.DatetimeIndex(data['Datetime (UTC)']).month
-    data['day'] = pd.DatetimeIndex(data['Datetime (UTC)']).day
-    data['hour'] = pd.DatetimeIndex(data['Datetime (UTC)']).hour
+    file_path = ('../data/Day-ahead_prices_202301010000_202401010000_Quarterhour_processed.csv')
+    data = pd.read_csv(file_path, sep=',')
+    # Ensure 'Start date' column is in datetime format
+    data['Start date'] = pd.to_datetime(data['Start date'])
 
     # assume charge and discharge prices are the same
     # assume prices are the same for all charging stations
-
     charge_prices = np.zeros((env.cs, env.simulation_length))
     discharge_prices = np.zeros((env.cs, env.simulation_length))
-    # for every simulation step, take the price of the corresponding hour
+    
+    # for every simulation step, take the price of the closest available time
     sim_temp_date = env.sim_starting_date
     for i in range(env.simulation_length):
+        # 找到最接近的時間戳
+        closest_time_index = (data['Start date'] - sim_temp_date).abs().idxmin()
+        # Find the corresponding price for the current time step
+        current_price = data.loc[closest_time_index, 'Germany/Luxembourg [EUR/MWh] Calculated resolutions']
 
-        year = sim_temp_date.year
-        month = sim_temp_date.month
-        day = sim_temp_date.day
-        hour = sim_temp_date.hour
-        # find the corresponding price
-        try:
-            charge_prices[:, i] = -data.loc[(data['year'] == year) & (data['month'] == month) & (data['day'] == day) & (data['hour'] == hour),
-                                            'Price (EUR/MWhe)'].iloc[0]/1000  # €/kWh
-            discharge_prices[:, i] = data.loc[(data['year'] == year) & (data['month'] == month) & (data['day'] == day) & (data['hour'] == hour),
-                                              'Price (EUR/MWhe)'].iloc[0]/1000  # €/kWh
-        except:
-            print(
-                'Error: no price found for the given date and hour. Using 2022 prices instead.')
+        # 填入 charge_prices 和 discharge_prices
+        charge_prices[:, i] = -current_price
+        discharge_prices[:, i] = current_price
 
-            year = 2022
-            if day > 28:
-                day -= 1
-            print("Debug:", year, month, day, hour)
-            charge_prices[:, i] = -data.loc[(data['year'] == year) & (data['month'] == month) & (data['day'] == day) & (data['hour'] == hour),
-                                            'Price (EUR/MWhe)'].iloc[0]/1000  # €/kWh
-            discharge_prices[:, i] = data.loc[(data['year'] == year) & (data['month'] == month) & (data['day'] == day) & (data['hour'] == hour),
-                                              'Price (EUR/MWhe)'].iloc[0]/1000  # €/kWh
+        # Move to the next time step
+        sim_temp_date += datetime.timedelta(minutes=env.timescale)
 
-        # step to next
-        sim_temp_date = sim_temp_date + \
-            datetime.timedelta(minutes=env.timescale)
-
-    discharge_prices = discharge_prices * env.config['discharge_price_factor']
+    # Adjust discharge prices
+    discharge_prices *= env.config.get('discharge_price_factor', 1.0)
     return charge_prices, discharge_prices
+

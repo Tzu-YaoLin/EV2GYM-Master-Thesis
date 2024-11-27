@@ -5,6 +5,8 @@ This file contains the EV_Charger class, which is used to represent the EV charg
 import numpy as np
 import math
 import torch
+from .ev import EV
+
 
 
 class EV_Charger:
@@ -193,8 +195,7 @@ class EV_Charger:
         for i, ev in enumerate(self.evs_connected):
             if ev is not None:
                 if ev.is_departing(self.current_step) is not None:
-                    # calculate battery degradation
-                    # _,_ = ev.get_battery_degradation()
+                    # calculate battery degradation for departing EV
                     self.evs_connected[i] = None
                     self.n_evs_connected -= 1
                     self.total_evs_served += 1
@@ -257,7 +258,8 @@ class EV_Charger:
         ev.id = index
         self.evs_connected[index] = ev
         self.n_evs_connected += 1
-
+        
+        
         if self.verbose:
             print(f'+ EV connected to Charger {self.id} at port {index}' +
                   f' leaving at {ev.time_of_departure}' +

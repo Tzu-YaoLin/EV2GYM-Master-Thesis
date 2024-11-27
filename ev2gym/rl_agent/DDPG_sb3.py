@@ -1,3 +1,5 @@
+import sys
+sys.path.append("C:/Users/River/Desktop/EV2Gym-main/EV2Gym-main")
 from stable_baselines3 import DDPG
 from stable_baselines3.common.vec_env import DummyVecEnv
 from stable_baselines3.common.callbacks import CheckpointCallback
@@ -21,16 +23,23 @@ household_loads_df = pd.read_csv(
 )
 household_loads = household_loads_df['SLP-Bandlastkunden HB [kWh]'].values
 
-# 讀取電價資料
+# 讀取電價資料並解析 `Start date` 為日期時間格式
 electricity_prices_df = pd.read_csv(
     '../data/Day-ahead_prices_202301010000_202401010000_Quarterhour_processed.csv', 
     sep=',', 
-    engine='python'
-)
-electricity_prices = electricity_prices_df['Germany/Luxembourg [€/MWh] Calculated resolutions'].values
+    engine='python',
+    )
+
+# 選擇 `Germany/Luxembourg [MWh] Calculated resolutions` 列作為電價數據
+electricity_prices = electricity_prices_df['Germany/Luxembourg [EUR/MWh] Calculated resolutions'].values
 
 # 檢查並替換 NaN 值
 electricity_prices = np.nan_to_num(electricity_prices, nan=0.0)
+
+# 打印電價數據範圍
+print("Electricity data range:", electricity_prices_df['Start date'].min(), "to", electricity_prices_df['Start date'].max())
+# 讀取電價資料後打印數據範圍
+print("Loaded electricity prices from file, date range:", electricity_prices_df['Start date'].min(), "to", electricity_prices_df['Start date'].max())
 
 # 創建自定義環境
 class CustomEV2Gym(EV2Gym):
@@ -47,7 +56,6 @@ class CustomEV2Gym(EV2Gym):
 config_file = "../example_config_files/V2GProfitMax.yaml"
 env = CustomEV2Gym(config_file, household_loads, electricity_prices, render_mode=True)
 
-# 設置狀態函數和獎勵函數
 low_price_threshold = np.percentile(electricity_prices, 25)
 high_price_threshold = np.percentile(electricity_prices, 75)
 

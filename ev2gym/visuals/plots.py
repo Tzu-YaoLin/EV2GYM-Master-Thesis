@@ -4,7 +4,9 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import numpy as np
 import datetime
+import os
 
+RESULTS_DIR = "C:/Users/River/Desktop/EV2Gym-main/EV2Gym-main/results"
 
 def visualize_step(env):
     '''Renders the current state of the environment in the terminal'''
@@ -120,7 +122,9 @@ def ev_city_plot(env):
 
         plt.tight_layout()
         # Save plt to html
-        fig_name = f'results/{env.sim_name}/EV_Energy_Level.png'  # .html
+        plot_dir = f"{RESULTS_DIR}/{env.sim_name}"
+        os.makedirs(plot_dir, exist_ok=True)
+        fig_name = f"{RESULTS_DIR}/{env.sim_name}/EV_Energy_Level.png"
         # plt.show()
         # save in pdf format
         plt.savefig(fig_name, format='png',  # svg
@@ -146,7 +150,9 @@ def ev_city_plot(env):
                    labels=[f'{d.hour:2d}:{d.minute:02d}' for d in date_range_print], rotation=45,
                    fontsize=22)
         plt.tight_layout()
-        fig_name = f'results/{env.sim_name}/Prices.png'
+        plot_dir = f"{RESULTS_DIR}/{env.sim_name}"
+        os.makedirs(plot_dir, exist_ok=True)
+        fig_name = f"{plot_dir}/Prices.png"
         plt.savefig(fig_name, format='png',
                     dpi=60, bbox_inches='tight')
 
@@ -237,8 +243,10 @@ def ev_city_plot(env):
             counter += 1
 
         plt.tight_layout()
+        plot_dir = f"{RESULTS_DIR}/{env.sim_name}"
+        os.makedirs(plot_dir, exist_ok=True)
         # plt.show()
-        fig_name = f'results/{env.sim_name}/Transformer_Current.png'
+        fig_name = f"{plot_dir}/Transformer_Current.png"
         plt.savefig(fig_name, format='png',
                     dpi=60, bbox_inches='tight')
 
@@ -331,8 +339,10 @@ def ev_city_plot(env):
             counter += 1
 
         plt.tight_layout()
+        plot_dir = f"{RESULTS_DIR}/{env.sim_name}"
+        os.makedirs(plot_dir, exist_ok=True)
         # Save plt to html
-        fig_name = f'results/{env.sim_name}/CS_Current_signals.png'
+        fig_name = f"{plot_dir}/CS_Current_signals.png"
         plt.savefig(fig_name, format='png', dpi=60, bbox_inches='tight')
 
     plt.close('all')
@@ -477,7 +487,9 @@ def ev_city_plot(env):
 
     if len(env.transformers) < 10:
         plt.tight_layout()
-        fig_name = f'results/{env.sim_name}/Transformer_Aggregated_Power.png'
+        plot_dir = f"{RESULTS_DIR}/{env.sim_name}"
+        os.makedirs(plot_dir, exist_ok=True)
+        fig_name = f"{plot_dir}/Transformer_Aggregated_Power.png"
         plt.savefig(fig_name, format='png',
                     dpi=60, bbox_inches='tight')
     else:
@@ -570,8 +582,10 @@ def ev_city_plot(env):
     plt.grid(True, which='minor', axis='both')
 
     plt.tight_layout()
+    plot_dir = f"{RESULTS_DIR}/{env.sim_name}"
+    os.makedirs(plot_dir, exist_ok=True)
     # plt.show()
-    fig_name = f'results/{env.sim_name}/Total_Aggregated_Power.png'
+    fig_name = f"{plot_dir}/Total_Aggregated_Power.png"
     plt.savefig(fig_name, format='png',
                 dpi=60, bbox_inches='tight')
 

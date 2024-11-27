@@ -3,6 +3,7 @@ import networkx as nx
 import PIL
 import numpy as np
 import pkg_resources
+import torch
 
 # Image URLs for graph nodes
 
@@ -269,7 +270,7 @@ class Renderer():
                     )
                     # 顯示實際電流
                     self.ev_to_charger_labels_ax[(ev_label, charger_label)].set_text(
-                        f"{round(ev_connected.actual_current, 1)}A"
+                        f"{round(float(ev_connected.actual_current), 1)}A"
                     )
         
                 counter += 1
@@ -277,19 +278,19 @@ class Renderer():
             # 顯示充電站到變壓器的電流
             transformer_label = "transformer_" + str(self.env.charging_stations[i].connected_transformer)
             self.charger_to_tr_axes[(charger_label, transformer_label)].set_text(
-                f"{round(self.env.charging_stations[i].current_total_amps, 1)}A"
+                f"{round(float(self.env.charging_stations[i].current_total_amps), 1)}A"
             )
         
             # 顯示充電站的總功率輸出
             self.charger_labels_ax[charger_label].set_text(
-                f"{round(self.env.charging_stations[i].current_power_output, 1)}kW"
+                f"{round(float(self.env.charging_stations[i].current_power_output), 1)}kW"
             )
 
         for i in range(0, self.env.number_of_transformers):
             # append transformer current to node labels
             self.tr_labels_ax["transformer_" +
-                              str(i)].set_text(str(round(self.env.transformers[i].current_amps /
-                                                         self.env.transformers[i].max_current[self.env.current_step-1]
+                              str(i)].set_text(str(round(float(self.env.transformers[i].current_amps) /
+                                                         float(self.env.transformers[i].max_current[self.env.current_step-1])
                                                          *100, 0)) + "%")
         # update ev nodes
         self.fig.canvas.draw()

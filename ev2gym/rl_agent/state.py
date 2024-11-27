@@ -73,20 +73,14 @@ def V2G_profit_max(env, *args):
 
     state.append(env.current_power_usage[env.current_step-1])
 
-    # 加入電價資料，使用 electricity_prices 而非 charge_prices
-    electricity_prices = abs(env.electricity_prices[env.current_step:env.current_step+20])
+    charge_prices = abs(env.charge_prices[0, env.current_step:
+        env.current_step+20])
     
-    if len(electricity_prices) < 20:
-        electricity_prices = np.append(electricity_prices, np.zeros(20-len(electricity_prices)))
+    if len(charge_prices) < 20:
+        charge_prices = np.append(charge_prices, np.zeros(20-len(charge_prices)))
     
-    state.append(electricity_prices)
+    state.append(charge_prices)
     
-    # 直接加入家庭負載數據和電價（假設已經標準化）
-    current_load = env.household_loads[env.current_step]
-    current_price = env.electricity_prices[env.current_step]
-    state.append(current_load)
-    state.append(current_price)
-
     # For every transformer
     for tr in env.transformers:
 
@@ -110,7 +104,6 @@ def V2G_profit_max(env, *args):
     state = np.array(np.hstack(state))
 
     return state
-
 
 def V2G_profit_max_loads(env, *args):
     '''

@@ -48,7 +48,7 @@ class EV():
                  battery_capacity_at_arrival,
                  time_of_arrival,
                  time_of_departure,                 
-                 desired_capacity=None,  # kWh
+                 desired_capacity=40,  # kWh
                  battery_capacity=50,  # kWh
                  min_battery_capacity=10,  # kWh
                  max_ac_charge_power=22,  # kW
@@ -72,6 +72,7 @@ class EV():
         self.time_of_departure = time_of_departure        
         self.desired_capacity = battery_capacity if desired_capacity is None else desired_capacity
         self.battery_capacity_at_arrival = battery_capacity_at_arrival  # kWh
+        self.departed = False  # 新增屬性，標記是否已經離開
 
         # EV technical characteristics
         self.battery_capacity = battery_capacity  # kWh
@@ -104,6 +105,7 @@ class EV():
         
         self.calendar_loss = 0
         self.cyclic_loss = 0
+        self.total_degradation = 0  # 初始化累計退化量
 
     def reset(self):
         '''
@@ -125,8 +127,9 @@ class EV():
         
         self.calendar_loss = 0
         self.cyclic_loss = 0
+        self.departed = False  # 重置 EV 的離開狀態
 
-    def step(self, amps, voltage, phases=1, type='AC') -> Tuple[float, float]:
+    def step(self, amps, voltage, phases=3, type='AC') -> Tuple[float, float]:
         '''
         The step method is used to update the EV's status according to the actions taken by the EV charger.
         Inputs:
@@ -173,24 +176,27 @@ class EV():
         #round up to the nearest 0.01 the current capacity
         self.current_capacity = self.my_ceil(self.current_capacity, 2)
         
-        self.active_steps.append(1 if self.actual_current != 0 else 0)
+        self.active_steps.append(1 if self.actual_current != 0 else 0)   
+        
+        self.get_battery_degradation()
+    
+        
         return self.current_energy, self.actual_current
 
     def my_ceil(self, a, precision=2):
         return np.true_divide(np.ceil(a * 10**precision), 10**precision)
 
     def is_departing(self, timestep) -> Union[float, None]:
-        '''
-        The is_departing method is used to determine whether the EV is departing or not.
-        Inputs:
-            - timestep: the current timestep of the simulation
-        Outputs:
-            - Returns the user satisfaction of the EV in departing else None
-        '''
-        if timestep < self.time_of_departure:
-            return None
+        if self.departed:
+            return None  # 如果已經離開，則不再計算滿意度
 
-        return self.get_user_satisfaction()
+        if timestep >= self.time_of_departure:
+            self.departed = True  # 標記該 EV 已經離開
+            # print(f"EV {self.id} is departing at Step {timestep}. Calculating user satisfaction.")
+            return self.get_user_satisfaction()
+
+        # print(f"EV {self.id} is not departing. Current Step: {timestep}, Departure Step: {self.time_of_departure}")
+        return None
 
     def get_user_satisfaction(self) -> float:
         '''
@@ -418,4 +424,8 @@ class EV():
         self.calendar_loss = d_cal
         self.cyclic_loss = d_cyc
         
+        # 更新 total_degradation
+        self.total_degradation += d_cal + d_cyc
+
         return d_cal, d_cyc
+    
