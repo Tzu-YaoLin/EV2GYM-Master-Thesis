@@ -85,7 +85,7 @@ for i in range(1000):
 The final comparison among algorithms was conducted using compareAllAlgorithms.py.
 For hyperparameter tuning of the A2C algorithm, A2C.ipynb was used, which internally calls train_a2c.py as a training script.
 
-Large-scale training runs were executed through a2cTraining.py, while evaluation and validation were performed using a2c_eval.py.
+Large-scale training runs were executed through a2ctraining.py, while evaluation and validation were performed using a2c_eval.py.
 
 To experiment with other reinforcement learning algorithms (e.g., DDPG, PPO, TD3), simply replace the algorithm-specific code and configurations in the mentioned files.
 
