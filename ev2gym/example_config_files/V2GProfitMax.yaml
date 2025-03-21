@@ -4,21 +4,21 @@
 # Simulation Parameters
 ##############################################################################
 timescale: 15 # in minutes per step
-simulation_length: 85 #90 # in steps per simulation
+simulation_length: 35040 #90 # in steps per simulation
 
 ##############################################################################
 # Date and Time
 ##############################################################################
 # Year, month, 
 year: 2023 # 2015-2023
-month: 12 # 1-12
-day: 30 # 1-31
+month: 1 # 1-12
+day: 1 # 1-31
 # Whether to get a random date every time the environment is reset
-random_day: True # True or False
+random_day: False # True or False
 
 # Simulation Starting Time
 # Hour and minute do not change after the environment has been reset
-hour: 5 # Simulation starting hour (24 hour format)
+hour: 0 # Simulation starting hour (24 hour format)
 minute: 0 # Simulation starting minute (0-59)
 
 # Simulate weekdays, weekends, or both
@@ -49,7 +49,7 @@ charging_network_topology: None #./config_files/charging_topology_10.json
 ##############################################################################
 # How much the power setpoints can vary in percentage compared to the nominal power
 # The higher the number the easier it is to meet the power setpoints, the opposite for negative numbers
-power_setpoint_flexiblity: 40 # (in percentage +/- %)
+power_setpoint_flexiblity: 20 # (in percentage +/- %)
 
 ##############################################################################
 # Inflexible Loads, Solar Generation, and Demand Response
@@ -98,7 +98,7 @@ heterogeneous_ev_specs: False #if False, each EV has the same specifications
 
 # Default Transformer model
 transformer:
-  max_power: 200 # in kW
+  max_power: 100 # in kW
 
 # Default Charging Station model
 charging_station:  
@@ -113,7 +113,7 @@ charging_station:
 ev:
   battery_capacity: 50 # in kWh
   min_battery_capacity: 10 # in kWh
-  desired_capacity: 40 # in kWh
+  desired_capacity: 50 # in kWh
   max_ac_charge_power: 22 # in kW
   min_ac_charge_power: 0 # in kW
   max_dc_charge_power: 50 # in kW
@@ -123,4 +123,4 @@ ev:
   transition_soc: 1 # 0-1 (0% - 100%)
   charge_efficiency: 1 # 0-1 (0% - 100%)
   discharge_efficiency: 1 # 0-1 (0% - 100%)
-  min_time_of_stay: 120 # in minutes
+  min_time_of_stay: 180 # in minutes

@@ -4,17 +4,6 @@ import numpy as np
 import math
 import torch
 import wandb
-#import pandas as pd
-
-# 讀取電價資料 (假設您只需要 'Germany/Luxembourg [€/MWh]' 列的電價)
-#electricity_prices_df = pd.read_csv('C:/Users/River/Desktop/EV2Gym-main/EV2Gym-main/ev2gym/data/Day-ahead_prices_202301010000_202401010000_Quarterhour.csv', sep=';', engine='python')
-
-# 提取電價列並將其轉換為 numpy 陣列
-#electricity_prices = electricity_prices_df['Germany/Luxembourg [€/MWh] Calculated resolutions'].values
-
-# 計算低電價和高電價的閾值
-#low_price_threshold = np.percentile(electricity_prices, 25)  # 第25百分位數
-#high_price_threshold = np.percentile(electricity_prices, 75)  # 第75百分位數
 
 def SquaredTrackingErrorReward(env,*args):
     '''This reward function is the squared tracking error that uses the minimum of the power setpoints and the charge power potential
@@ -88,107 +77,92 @@ def MinimizeTrackerSurplusWithChargeRewards(env,*args):
     return reward
 
 def profit_maximization(env, total_costs, user_satisfaction_list, actions, invalid_action_punishment, *args):
-    reward = total_costs  # Initial reward based on total costs
+    reward = total_costs   # Initial reward based on total costs
     
     # Set parameters 
-    degradation_cost_factor = 0.912
-    invalid_action_penalty_factor = 1.072
-    charge_price_reward_factor = 25.848
-    discharge_price_reward_factor = 25.425
-    transformer_load_penalty = 46.179
-    transformer_load_factor_lowload = 15.881
-    discharge_encouragement = 15.016
+    degradation_cost_factor = 0.01 
+    # charge_price_reward_factor = 0.3
+    soc_reward_factor = 9 
     
-    # # Set degradation cost factor
-    # degradation_cost_factor = 0.3  # Cost factor per unit degradation
-    # degradation_reward = 0
-        
-    # Add penalty for invalid actions
-    # invalid_action_penalty_factor = 3 # Penalty factor for invalid actions
-    invalid_action_penalty = invalid_action_punishment * invalid_action_penalty_factor * -1
-    reward += invalid_action_penalty
-
-    # Current charging and discharging prices
-    current_charge_price = env.charge_prices[0, env.current_step - 1]
-    current_discharge_price = env.discharge_prices[0, env.current_step - 1]
-    
-    positive_charge_prices = env.charge_prices[env.charge_prices < 0]
-    positive_discharge_prices = env.discharge_prices[env.discharge_prices > 0]
-
-    # Calculate the percentile for charging and discharging prices
-    charge_price_percentile = np.percentile(positive_charge_prices, 35)
-    discharge_price_percentile = np.percentile(positive_discharge_prices, 65)
-    
-    # Calculate the average charging and discharging prices
-    avg_charge_price = np.mean(positive_charge_prices)
-    avg_discharge_price = np.mean(positive_discharge_prices)
-
     # User satisfaction reward/penalty
     user_satisfaction_reward = 0
-    for score in user_satisfaction_list:
-        user_satisfaction_reward -= 10 * math.exp(-5 * (score - 0.7))
-
-    reward += user_satisfaction_reward
-    
-    # Charge and discharge rewards for each action
-    charge_price_reward = 0
-    discharge_price_reward = 0    
     transformer_load_reward = 0
     degradation_reward = 0
+    soc_reward = 0
+    
+    # positive_charge_prices = env.charge_prices[env.charge_prices < 0]
+    # positive_discharge_prices = env.discharge_prices[env.discharge_prices > 0]
+    # current_charge_price = env.charge_prices[0, env.current_step - 1]
+    # current_discharge_price = env.discharge_prices[0, env.current_step - 1]
+    # avg_charge_price = np.mean(positive_charge_prices)
+    # avg_discharge_price = np.mean(positive_discharge_prices)
+    # charge_price_percentile = np.percentile(positive_charge_prices, 70)
+    # discharge_price_percentile = np.percentile(positive_discharge_prices, 70)
+    
+    
+    for score in user_satisfaction_list:
+        # user_satisfaction_reward -= 150 * math.exp(-10*score) + 1
+        if score < 0.75 :
+            user_satisfaction_reward += 12 * (math.exp(10*(score-0.75)) -1)
+            # user_satisfaction_reward -= 150 * math.exp(-10*score) + 0.0663
+        else:
+            user_satisfaction_reward += 10 * math.tanh(50*(score - 0.75)) 
+            # user_satisfaction_reward += 70 * math.log(score + 0.25)
+            
+    reward += user_satisfaction_reward
+    
+    # Transformer load reward/penalty
+    for tr in env.transformers:
+        # transformer_load_reward -= 100 * tr.get_how_overloaded() 
+        overload_ratio = tr.get_how_overloaded() / tr.max_power[env.current_step - 1]
+        transformer_load_reward -= 10 * overload_ratio 
+            
+    reward += transformer_load_reward
     
     if env.current_evs_parked > 0:
-        for action in actions:
-            if action > 0:  # Charging price reward/penalty
-                if current_charge_price > 0:
-                    charge_price_reward += 50  # Negative charging price, high reward
-                else:
-                    charge_price_reward -= ((current_charge_price - charge_price_percentile) / avg_charge_price) * charge_price_reward_factor
-                
-                reward += charge_price_reward
-            
-            elif action < 0:  # Discharging price reward/penalty
-                if current_discharge_price < 0:
-                    discharge_price_reward -= 50  # Negative discharging price, penalty
-                else:
-                    discharge_price_reward += ((current_discharge_price - discharge_price_percentile) / avg_discharge_price) * discharge_price_reward_factor
+        # for action in actions:
+        #     if action > 0:  # Charging price reward/penalty
+        #         if current_charge_price > charge_price_percentile:
+        #             reward += abs(abs(action) * ((current_charge_price - charge_price_percentile) / avg_charge_price) * charge_price_reward_factor)
+        #         elif current_charge_price > avg_charge_price:
+        #             reward += abs(abs(action) * ((current_charge_price - avg_charge_price) / avg_charge_price) * charge_price_reward_factor * 0.5)
+        #     elif action < 0:
+        #         if current_discharge_price > discharge_price_percentile:
+        #             reward += abs(action) * ((current_discharge_price - discharge_price_percentile) / avg_discharge_price) * charge_price_reward_factor
+                # elif current_discharge_price > avg_discharge_price:
+                #     reward += abs(action) * ((current_discharge_price - avg_discharge_price) / avg_discharge_price) * charge_price_reward_factor * 0.5
                     
-                reward += discharge_price_reward
-
-        # Transformer load reward/penalty
-        for tr in env.transformers:
-            load_threshold = tr.max_power[env.current_step - 1] * 0.8
-            total_load = tr.current_power
-    
-            if total_load > load_threshold:
-                transformer_load_reward -= transformer_load_penalty * (total_load - load_threshold) / tr.max_power[env.current_step - 1]
-                if  action < 0:
-                    reward += discharge_encouragement  # Encourage discharging
-            else:
-                transformer_load_reward += transformer_load_factor_lowload * (load_threshold - total_load) / tr.max_power[env.current_step - 1]
-    
-        reward += transformer_load_reward
-        
         # Calculate degradation cost
         for ev in env.EVs:
-            if ev.total_degradation < 0.1:
-                degradation_reward -= ev.charging_cycles * degradation_cost_factor 
-            elif ev.total_degradation < 0.2:
-                degradation_reward -= ev.charging_cycles * degradation_cost_factor * 4
+            if len(ev.historic_soc) > 1:
+                previous_soc = ev.historic_soc[-2]
             else:
-                degradation_reward -= ev.charging_cycles * degradation_cost_factor * 6
-        
-        reward += degradation_reward
+                previous_soc = ev.historic_soc[-1] if len(ev.historic_soc) > 0 else ev.get_soc()
+                
+            if ev.get_soc() > previous_soc:
+                soc_reward = soc_reward_factor * (ev.get_soc() - previous_soc)
+            else:
+                soc_reward = 0
 
+            if ev.total_degradation < 0.1:
+                degradation_reward = -1 * ev.charging_cycles * degradation_cost_factor 
+            elif ev.total_degradation < 0.2:
+                degradation_reward = -1 * ev.charging_cycles * degradation_cost_factor * 1.5
+            else:
+                degradation_reward = -1 * ev.charging_cycles * degradation_cost_factor * 2
+            
+        reward += degradation_reward + soc_reward
+    
+    
     # Construct reward contributions
     reward_contributions = {
         "degradation_reward": degradation_reward,
-        "invalid_action_penalty": invalid_action_penalty,
         "user_satisfaction_reward": user_satisfaction_reward,
         "transformer_load_reward": transformer_load_reward,
-        "charge_price_reward": charge_price_reward,
-        "discharge_price_reward": discharge_price_reward,
+        "total_costs": total_costs,
+        "soc_reward": soc_reward,
     }
-
+    
     return reward, reward_contributions
 
 

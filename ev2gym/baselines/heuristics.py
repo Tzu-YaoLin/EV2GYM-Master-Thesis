@@ -262,3 +262,34 @@ class ChargeAsFastAsPossibleToDesiredCapacity():
                 counter += 1
 
         return action_list
+
+class ChargeAsFastAsPossibleWrapper(ChargeAsFastAsPossible):
+    def __init__(self, verbose=False, **kwargs):
+        super().__init__(verbose, **kwargs)
+        self.env = None  # Initialize the environment variable
+
+    def set_env(self, env):
+        """
+        Sets the environment, which can be used later in the predict method.
+        """
+        self.env = env
+
+    def predict(self, obs, deterministic=True):
+        """
+        Mimics the RL model's predict method by calling the get_action method.
+        Note: This method ignores the observation 'obs' and uses self.env to calculate the action.
+        Returns:
+            action: The computed action.
+            None: A placeholder to keep the interface consistent with RL models.
+        """
+        if self.env is None:
+            raise ValueError("Environment is not set. Please call set_env(env) to set the environment.")
+        action = self.get_action(self.env)
+        return action, None
+
+    @classmethod
+    def load(cls, model_path=None, device="cpu"):
+        """
+        Loads the model. For heuristic algorithms, this method simply returns an instance.
+        """
+        return cls()

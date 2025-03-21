@@ -82,7 +82,7 @@ def generate_residential_inflexible_loads(env) -> np.ndarray:
     '''
 
     # Load the data from CSV file
-    data_path = ('../data/standardlastprofil-haushalte-2023.csv')
+    data_path = ('../data/standardlastprofil-haushalte-sorted.csv')
     data = pd.read_csv(data_path, header=0)
 
     # Combine the 'Datum' and 'Uhrzeit' columns to create a datetime index
@@ -90,7 +90,7 @@ def generate_residential_inflexible_loads(env) -> np.ndarray:
 
     # Set 'Datetime' as index and keep the load data column
     data.set_index('Datetime', inplace=True)
-    load_column_name = data.columns[-1]  # Use the last column as the load data
+    load_column_name = "SLP [kWh]"
     data = data[[load_column_name]]
 
     # Rename load column for easier reference
@@ -116,7 +116,11 @@ def generate_residential_inflexible_loads(env) -> np.ndarray:
     number_of_transformers = env.number_of_transformers
 
     for i in range(number_of_transformers):
-        new_data[f'tr_{i}'] = data_for_simulation['load']
+        # 隨機比例因子
+        random_factor = env.tr_rng.uniform(0.9, 1.1, size=simulation_length)
+        # 將每個transformer的負載乘上一個每一步都稍微不同的隨機比例
+        transformer_load = data_for_simulation['load'].values * random_factor
+        new_data[f'tr_{i}'] = transformer_load
 
     # Convert to numpy array and return
     return new_data.to_numpy().T
@@ -180,7 +184,7 @@ def generate_pv_generation(env) -> np.ndarray:
     new_data = pd.DataFrame()
 
     for i in range(number_of_transformers):
-        new_data['tr_'+str(i)] = data * env.tr_rng.uniform(0.9, 1.1)
+        new_data['tr_'+str(i)] = data * env.tr_rng.uniform(1, 1)
 
     return new_data.to_numpy().T
 
@@ -355,7 +359,7 @@ def load_electricity_prices(env) -> Tuple[np.ndarray, np.ndarray]:
         return env.replay.charge_prices, env.replay.discharge_prices
 
     # else load historical prices
-    file_path = ('../data/Day-ahead_prices_202301010000_202401010000_Quarterhour_processed.csv')
+    file_path = ('../data/Merged_Day-ahead_prices_202201010000_202501021700.csv')
     data = pd.read_csv(file_path, sep=',')
     # Ensure 'Start date' column is in datetime format
     data['Start date'] = pd.to_datetime(data['Start date'])
@@ -371,11 +375,18 @@ def load_electricity_prices(env) -> Tuple[np.ndarray, np.ndarray]:
         # 找到最接近的時間戳
         closest_time_index = (data['Start date'] - sim_temp_date).abs().idxmin()
         # Find the corresponding price for the current time step
-        current_price = data.loc[closest_time_index, 'Germany/Luxembourg [EUR/MWh] Calculated resolutions']
+        current_price = data.loc[closest_time_index, 'Germany/Luxembourg [EUR/kWh] Calculated resolutions']
 
         # 填入 charge_prices 和 discharge_prices
         charge_prices[:, i] = -current_price
         discharge_prices[:, i] = current_price
+        
+        # 增加隨機比例因子，例如在0.9~1.1區間內
+        # 每個時間步驟可有不同的比例
+        random_factor = env.tr_rng.uniform(0.9, 1.1)
+        charge_prices[:, i] *= random_factor
+        discharge_prices[:, i] *= random_factor
+
 
         # Move to the next time step
         sim_temp_date += datetime.timedelta(minutes=env.timescale)

@@ -292,6 +292,10 @@ class V2GProfitMaxOracleGB():
                         # self.m.addLConstr(energy[p, i, t] >= ev_max_energy_at_departure[p,i,t],
                                         #    ev_des_energy[p, i, t]),
                                           name=f'ev_departure_energy.{p}.{i}.{t}')
+                        
+                        # Ensure that the SOC (State of Charge) at departure is at least 60%
+                        self.m.addLConstr(energy[p, i, t] >= 0.75 * ev_max_energy[p, i, t],
+                                          name=f'ev_departure_soc_min.{p}.{i}.{t}')
 
         self.m.setObjective(costs,
                             GRB.MAXIMIZE)
@@ -342,3 +346,42 @@ class V2GProfitMaxOracleGB():
         step = env.current_step
 
         return self.actions[:, :, step].T.reshape(-1)
+
+class V2GProfitMaxOracleGBWrapper(V2GProfitMaxOracleGB):
+    """
+    A wrapper for the MILP-based V2GProfitMaxOracleGB model so that it can interface with an RL environment.
+    This wrapper implements set_env() and predict() methods.
+    """
+    def __init__(self, replay_path, **kwargs):
+        # Initialize the MILP model using the replay file.
+        super().__init__(replay_path, **kwargs)
+        self.env = None  # Environment will be set later
+
+    def set_env(self, env):
+        """
+        Sets the environment for the MILP model.
+        """
+        self.env = env
+
+    def predict(self, obs, deterministic=True):
+        """
+        Mimics the RL agent's predict method.
+        Since this MILP model is solved offline, we assume the actions for the entire simulation have been computed.
+        This method returns the action corresponding to the current step in the environment.
+        """
+        if self.env is None:
+            raise ValueError("Environment is not set. Please call set_env(env) first.")
+        # Retrieve current step from the environment
+        action = self.get_action(self.env)
+        return action, None
+
+    @classmethod
+    def load(cls, replay_path=None, env=None, device="cpu", **kwargs):
+        if replay_path is None:
+            raise ValueError("replay_path must be provided for the MILP model.")
+            # 或者給予一個預設的 replay file 路徑：
+            # replay_path = "default_replay_file.pkl"
+        instance = cls(replay_path, **kwargs)
+        if env is not None:
+            instance.set_env(env)
+        return instance

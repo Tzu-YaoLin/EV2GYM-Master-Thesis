@@ -68,11 +68,11 @@ def V2G_profit_max(env, *args):
     '''
     
     state = [
-        (env.current_step),        
+        # (env.current_step),        
     ]
 
     state.append(env.current_power_usage[env.current_step-1])
-
+    
     charge_prices = abs(env.charge_prices[0, env.current_step:
         env.current_step+20])
     
@@ -81,13 +81,56 @@ def V2G_profit_max(env, *args):
     
     state.append(charge_prices)
     
+    # Calculate and add the average charge price for the entire environment
+    avg_charge_price = abs(np.mean(env.charge_prices[env.charge_prices < 0]))  # Assuming negative prices are charge prices
+    state.append(avg_charge_price)
+
+    # # Add current charge price
+    # current_charge_price = env.charge_prices[0, env.current_step - 1]
+    # state.append(current_charge_price)
+    
+    # # Add average future charge price over the next 24 steps
+    # future_charge_prices = env.charge_prices[0, env.current_step:env.current_step + 24]
+    
+    # if len(future_charge_prices) < 24:
+    #     future_charge_prices = np.append(future_charge_prices, np.zeros(24 - len(future_charge_prices)))
+    
+    # avg_future_charge_price = np.mean(future_charge_prices)
+    # state.append(avg_future_charge_price)
+
+    # # Add current discharge price
+    # current_discharge_price = env.discharge_prices[0, env.current_step - 1]
+    # state.append(current_discharge_price)
+    
+    # # Add average future discharge price over the next 24 steps
+    # future_discharge_prices = env.discharge_prices[0, env.current_step:env.current_step + 24]
+    
+    # if len(future_discharge_prices) < 24:
+    #     future_discharge_prices = np.append(future_discharge_prices, np.zeros(24 - len(future_discharge_prices)))
+    
+    # avg_future_discharge_price = np.mean(future_discharge_prices)
+    # state.append(avg_future_discharge_price)
+
     # For every transformer
     for tr in env.transformers:
+        
+        # Add current step net load
+        # current_load = tr.inflexible_load[env.current_step - 1]
+        # current_pv = tr.solar_power[env.current_step - 1]
+        # current_net_load = current_load - current_pv
+        # Add transformer overload information
+        overload_value = tr.get_how_overloaded()
+        state.append(overload_value)
+        # Append only the current step net load to the state
+        # state.append(current_net_load)
+                
+        # power_limits = tr.get_power_limits(step = env.current_step,
+        #                                    horizon = 1)     
+        # state.append(power_limits)
 
         # For every charging station connected to the transformer
         for cs in env.charging_stations:
             if cs.connected_transformer == tr.id:
-
                 # For every EV connected to the charging station
                 for EV in cs.evs_connected:
                     # If there is an EV connected
@@ -95,6 +138,8 @@ def V2G_profit_max(env, *args):
                         state.append([
                             EV.get_soc(),
                             EV.time_of_departure - env.current_step,
+                            # EV.total_degradation,
+                            # EV.charging_cycles,
                             ])
 
                     # else if there is no EV connected put zeros
@@ -102,7 +147,7 @@ def V2G_profit_max(env, *args):
                         state.append(np.zeros(2))
 
     state = np.array(np.hstack(state))
-
+    
     return state
 
 def V2G_profit_max_loads(env, *args):

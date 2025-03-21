@@ -4,9 +4,6 @@ This file contains the EV_Charger class, which is used to represent the EV charg
 
 import numpy as np
 import math
-import torch
-from .ev import EV
-
 
 
 class EV_Charger:
@@ -96,15 +93,18 @@ class EV_Charger:
 
         self.verbose = verbose
 
-
     def step(self, actions, charge_price, discharge_price):
-        # 確保 actions 是 Tensor 並進行複製
-        actions = torch.tensor(actions) if not isinstance(actions, torch.Tensor) else actions.clone()
-        
-        # 檢查 NaN 值並報錯
-        if torch.isnan(actions).any():
-            raise ValueError(f"Actions contain NaN values: {actions}")
-        
+        '''
+        Updates the EV charger status according to the actions taken by the EVs
+        Inputs:
+            - actions: a list of actions taken by the EVs connected to the EV charger in the format of (current) *n_ports positive for charging negative for discharging, default is to zer if no ev is connected        
+            - charge_price: the price of charging per kWh in the current timestep
+            - discharge_price: the price of discharging per kWh in the current timestep
+
+        Outputs:
+            - profit: the total profit + costs of charging and discharging in the current timestep
+            - user_satisfaction: a list of user satisfaction values for each EV connected to the EV charger in the current timestep
+        '''
         profit = 0
         user_satisfaction = []
         self.current_power_output = 0
@@ -112,44 +112,41 @@ class EV_Charger:
         self.current_charge_price = charge_price
         self.current_discharge_price = discharge_price
         self.current_signal = []
-        
-        assert len(actions) == self.n_ports, f"Expected {self.n_ports} actions, got {len(actions)}"
+
+        assert (len(actions) == self.n_ports)
+        # if no EV is connected, set action to 0
         invalid_action_punishment = 0
-    
-        # 如果沒有 EV 連接，則將該位置的 action 設置為 0
         for i in range(len(actions)):
             if self.evs_connected[i] is None:
                 actions[i] = 0
                 invalid_action_punishment += 1
-        
-        # 計算 action 的總和，並避免除零
-        total_action_sum = torch.sum(actions).item()
-        
-        if total_action_sum > 1:
-            normalized_actions = actions / total_action_sum
-        elif total_action_sum < -1:
-            normalized_actions = -actions / total_action_sum
+
+        # normalize actions to sum to 1 for charging surplass or -1 for discharging surplass
+        if sum(actions) > 1:
+            normalized_actions = [action / sum(actions) for action in actions]
+        elif sum(actions) < -1:
+            normalized_actions = [- action /
+                                  sum(actions) for action in actions]
         else:
-            normalized_actions = actions  # 若總和在 [-1, 1] 內，則不需要歸一化
-        
+            normalized_actions = actions
+
         if self.verbose:
             print(f'CS {self.id} normalized actions: {normalized_actions}')
-            # 接下來的代碼不變，繼續處理 normalized_actions
-            
+
         # Update EVs connected to the EV charger and get profits/costs
         for i, action in enumerate(normalized_actions):
             actual_energy = 0
-            # 使用torch.round
-            action = torch.round(action * 1e5) / 1e5  # 保留小數點後五位
-            # 確保所有的 action 都在範圍內
-            assert torch.all((action >= -1) & (action <= 1)), f'Action {action} is not in range [-1,1]'
+            action = round(action, 5)
+            assert (action >= -1 and action <= 1,
+                    f'Action {action} is not in range [-1,1]')
+
             amps = 0
-            if torch.all(action == 0) and self.evs_connected[i] is not None:
+            if action == 0 and self.evs_connected[i] is not None:
 
                 actual_energy, actual_amps = self.evs_connected[i].step(
                     amps, self.voltage)
 
-            elif (action > 0).any():
+            elif action > 0:
                 amps = action * self.max_charge_current
                 if amps < self.min_charge_current-0.01:
                     amps = 0
@@ -165,7 +162,7 @@ class EV_Charger:
                 self.current_power_output += actual_energy * 60/self.timescale
                 self.current_total_amps += actual_amps
 
-            elif (action < 0).any():
+            elif action < 0:
                 amps = action * abs(self.max_discharge_current)
                 if amps > self.min_discharge_current-0.01:
                     amps = self.min_discharge_current
@@ -195,7 +192,8 @@ class EV_Charger:
         for i, ev in enumerate(self.evs_connected):
             if ev is not None:
                 if ev.is_departing(self.current_step) is not None:
-                    # calculate battery degradation for departing EV
+                    # calculate battery degradation
+                    # _,_ = ev.get_battery_degradation()
                     self.evs_connected[i] = None
                     self.n_evs_connected -= 1
                     self.total_evs_served += 1
@@ -212,9 +210,6 @@ class EV_Charger:
         self.current_step += 1
 
         return profit, user_satisfaction, invalid_action_punishment, departing_evs
-# %%
-
-
 
     def __str__(self) -> str:
 
@@ -258,8 +253,7 @@ class EV_Charger:
         ev.id = index
         self.evs_connected[index] = ev
         self.n_evs_connected += 1
-        
-        
+
         if self.verbose:
             print(f'+ EV connected to Charger {self.id} at port {index}' +
                   f' leaving at {ev.time_of_departure}' +

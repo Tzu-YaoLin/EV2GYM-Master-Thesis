@@ -108,18 +108,35 @@ class V2GProfitMaxOracle(MPC):
         model.addConstrs((u[j] <= self.UB[j]*(1-Zbin[j//2])
                           for j in range(1, nb*h, 2)),
                          name="constr4b")
+        
+        # Ensure that EV's state of charge (SOC) is at least 60% upon departure
+        for ev in env.EVs:
+            if ev.time_of_departure == t:
+                model.addConstr(
+                    ev.get_soc() >= 0.6,
+                    name=f"ev_departure_soc_ev{ev.id}_t{t}"
+                )
+            
+        # When SOC >= desired_capacity, force charging to 0
+        for ev_index, ev in enumerate(env.EVs):
+            for t in range(self.control_horizon):
+                if ev.get_soc() >= ev.desired_capacity / ev.battery_capacity:
+                    model.addConstr(
+                        u[ev_index * 2 * self.control_horizon + 2 * t] == 0,
+                        name=f"limit_soc_ev{ev.id}_t{t}_soc"
+                    )
 
         # Add the transformer constraints
-        # for tr_index in range(self.number_of_transformers):
-        #     for i in range(self.control_horizon):
-        #         model.addConstr((gp.quicksum((u[j] - u[j+1])
-        #                                      for index, j in enumerate(
-        #                                          range(i*self.nb, (i+1)*self.nb, 2))
-        #                                      if self.cs_transformers[index] == tr_index) +
-        #                          self.tr_loads[tr_index, i] +
-        #                          self.tr_pv[tr_index, i] <=
-        #                          self.tr_power_limit[tr_index, i]),
-        #                         name=f'constr5_{tr_index}_t{i}')
+        for tr_index in range(self.number_of_transformers):
+            for i in range(self.control_horizon):
+                model.addConstr((gp.quicksum((u[j] - u[j+1])
+                                             for index, j in enumerate(
+                                                 range(i*self.nb, (i+1)*self.nb, 2))
+                                             if self.cs_transformers[index] == tr_index) +
+                                 self.tr_loads[tr_index, i] +
+                                 self.tr_pv[tr_index, i] <=
+                                 self.tr_power_limit[tr_index, i]),
+                                name=f'constr5_{tr_index}_t{i}')
 
         obj_expr = gp.LinExpr()
         for i in range(nb*h):
@@ -268,7 +285,7 @@ class V2GProfitMaxLoadsOracle(MPC):
         # Add the transformer constraints
         for tr_index in range(self.number_of_transformers):
             for i in range(self.control_horizon):
-                model.addConstr((gp.quicksum((u[j] - u[j+1])
+                model.addConstrs((gp.quicksum((u[j] - u[j+1])
                                              for index, j in enumerate(
                                                  range(i*self.nb, (i+1)*self.nb, 2))
                                              if self.cs_transformers[index] == tr_index) +
@@ -323,3 +340,57 @@ class V2GProfitMaxLoadsOracle(MPC):
         self.actions = actions
         
         return actions[t, :]
+
+class V2GProfitMaxOracleWrapper(V2GProfitMaxOracle):
+    def __init__(self, env=None, verbose=False, **kwargs):
+        """
+        Wrapper initializer.
+        If env is provided, call the parent's __init__ to initialize the MPC model.
+        Otherwise, delay initialization until set_env is called.
+        """
+        self.env = env
+        self.verbose = verbose
+        if env is not None:
+            # Initialize the parent class with the provided environment.
+            super().__init__(env, verbose, **kwargs)
+        else:
+            # Delay initialization; you might need to set additional parameters later.
+            self.actions = None
+
+    def set_env(self, env):
+        """
+        Sets the environment and, if necessary, initializes the parent MPC model.
+        """
+        self.env = env
+        # If the parent's initialization has not been executed (env was None during __init__),
+        # call the parent's __init__ now.
+        if not hasattr(self, 'simulation_length'):
+            super().__init__(env, self.verbose)
+
+    def predict(self, obs, deterministic=True):
+        """
+        Mimics the RL model's predict method by calling the get_action method.
+        Note: The observation 'obs' is ignored because the MPC model uses the environment.
+        Returns:
+            action: The computed action.
+            None: A placeholder to keep the interface consistent with RL models.
+        """
+        if self.env is None:
+            raise ValueError("Environment is not set. Please call set_env(env) first.")
+        action = self.get_action(self.env)
+        return action, None
+
+    @classmethod
+    def load(cls, model_path=None, env=None, device="cpu", custom_objects=None):
+        """
+        For the MPC model, loading from file is not needed.
+        This method returns a new instance of the model.
+        The additional parameters (env, device, custom_objects) are accepted for compatibility.
+        """
+        # Create a new instance using the provided environment.
+        instance = cls(env=env, verbose=False)
+        # You can also store the device or custom_objects in the instance if needed.
+        instance.device = device
+        instance.custom_objects = custom_objects
+        return instance
+
