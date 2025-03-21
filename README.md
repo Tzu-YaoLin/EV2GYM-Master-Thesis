@@ -82,7 +82,7 @@ for i in range(1000):
 
 ## Final Experiments and Training Workflow
 
-The final comparison among algorithms was conducted using compareAllAlgorithms.py.
+The final comparison among algorithms was conducted using compareallalgorithms.py.
 For hyperparameter tuning of the A2C algorithm, A2C.ipynb was used, which internally calls train_a2c.py as a training script.
 
 Large-scale training runs were executed through a2ctraining.py, while evaluation and validation were performed using a2c_eval.py.
